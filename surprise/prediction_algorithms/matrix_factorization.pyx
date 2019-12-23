@@ -6,13 +6,10 @@ factorization.
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
-import datetime
-
 cimport numpy as np  # noqa
 import numpy as np
 from six.moves import range
 
-from ..accuracy import rmse
 from .algo_base import AlgoBase
 from .predictions import PredictionImpossible
 from ..utils import get_rng
@@ -81,6 +78,8 @@ class SVD(AlgoBase):
 
     Args:
         n_factors: The number of factors. Default is ``100``.
+        n_epochs: The number of iteration of the SGD procedure. Default is
+            ``20``.
         biased(bool): Whether to use baselines (or biases). See :ref:`note
             <unbiased_note>` above.  Default is ``True``.
         init_mean: The mean of the normal distribution for factor vectors
@@ -126,13 +125,14 @@ class SVD(AlgoBase):
             exists if ``fit()`` has been called)
     """
 
-    def __init__(self, n_factors=100, biased=True, init_mean=0,
+    def __init__(self, n_factors=100, n_epochs=20, biased=True, init_mean=0,
                  init_std_dev=.1, lr_all=.005,
                  reg_all=.02, lr_bu=None, lr_bi=None, lr_pu=None, lr_qi=None,
                  reg_bu=None, reg_bi=None, reg_pu=None, reg_qi=None,
                  random_state=None, verbose=False):
 
         self.n_factors = n_factors
+        self.n_epochs = n_epochs
         self.biased = biased
         self.init_mean = init_mean
         self.init_std_dev = init_std_dev
@@ -149,18 +149,14 @@ class SVD(AlgoBase):
 
         AlgoBase.__init__(self)
 
-    def output(self, str):
-        if self.verbose:
-            print("{} - {}".format(datetime.datetime.utcnow().strftime("%H:%M:%S"), str))
-
-    def fit(self, trainset, testset):
+    def fit(self, trainset):
 
         AlgoBase.fit(self, trainset)
-        self.sgd(trainset, testset)
+        self.sgd(trainset)
 
         return self
 
-    def sgd(self, trainset, testset):
+    def sgd(self, trainset):
 
         # OK, let's breath. I've seen so many different implementation of this
         # algorithm that I just not sure anymore of what it should do. I've
@@ -229,22 +225,19 @@ class SVD(AlgoBase):
         if not self.biased:
             global_mean = 0
 
-        cdef float best_score, score, ipvmt
-
-        for current_epoch in range(1000):
-            self.output("Processing epoch {}".format(current_epoch))
+        for current_epoch in range(self.n_epochs):
+            if self.verbose:
+                print("Processing epoch {}".format(current_epoch))
             for u, i, r in trainset.all_ratings():
 
                 # compute current error
                 dot = 0  # <q_i, p_u>
                 for f in range(self.n_factors):
                     dot += qi[i, f] * pu[u, f]
-
-                err = r - dot
+                err = r - (global_mean + bu[u] + bi[i] + dot)
 
                 # update biases
                 if self.biased:
-                    err = err - (global_mean + bu[u] + bi[i])
                     bu[u] += lr_bu * (err - reg_bu * bu[u])
                     bi[i] += lr_bi * (err - reg_bi * bi[i])
 
@@ -254,20 +247,6 @@ class SVD(AlgoBase):
                     qif = qi[i, f]
                     pu[u, f] += lr_pu * (err * qif - reg_pu * puf)
                     qi[i, f] += lr_qi * (err * puf - reg_qi * qif)
-            self.bu = bu
-            self.bi = bi
-            self.pu = pu
-            self.qi = qi
-            self.output("Calculating predictions on test set...")
-            score = rmse(self.test(testset), verbose=False)
-            self.output("RMSE on test set: {0:.4f}".format(score))
-            if best_score > 0:
-                ipvmt = 100 * (best_score - score) / best_score
-                self.output("Improved by {0:.2f}%".format(ipvmt))
-                if ipvmt < 0.02:
-                    # improvement less than 0.02%. Stopping there.
-                    break
-            best_score = score
 
         self.bu = bu
         self.bi = bi
@@ -280,13 +259,8 @@ class SVD(AlgoBase):
         known_user = self.trainset.knows_user(u)
         known_item = self.trainset.knows_item(i)
 
-        if not known_user or not known_item:
-            raise PredictionImpossible('User or item are unknown.')
-
-        est = np.dot(self.qi[i], self.pu[u])
-
         if self.biased:
-            est += self.trainset.global_mean
+            est = self.trainset.global_mean
 
             if known_user:
                 est += self.bu[u]
@@ -294,7 +268,17 @@ class SVD(AlgoBase):
             if known_item:
                 est += self.bi[i]
 
+            if known_user and known_item:
+                est += np.dot(self.qi[i], self.pu[u])
+
+        else:
+            if known_user and known_item:
+                est = np.dot(self.qi[i], self.pu[u])
+            else:
+                raise PredictionImpossible('User and item are unkown.')
+
         return est
+
 
 class SVDpp(AlgoBase):
     """The *SVD++* algorithm, an extension of :class:`SVD` taking into account
