@@ -153,19 +153,32 @@ class SVD(AlgoBase):
     def fit(self, trainset):
 
         AlgoBase.fit(self, trainset)
+        self.reset(trainset)
         self.sgd(trainset)
 
         return self
 
     def output (self, str):
+
         if self.verbose:
             print(str)
 
-    def setOptimalNEpochs(self, trainset, testset):
+    def reset (self, trainset):
+
+        rng = get_rng(self.random_state)
+        self.bu = np.zeros(trainset.n_users, np.double)
+        self.bi = np.zeros(trainset.n_items, np.double)
+        self.pu = rng.normal(self.init_mean, self.init_std_dev,
+                        (trainset.n_users, self.n_factors))
+        self.qi = rng.normal(self.init_mean, self.init_std_dev,
+                        (trainset.n_items, self.n_factors))
+
+    def fit_with_undefined_nepochs(self, trainset, testset):
         cdef int n_epochs, current_epoch
         cdef float best_score, score, ipvmt
         self.n_epochs = 1
         AlgoBase.fit(self, trainset)
+        self.reset(trainset)
         for current_epoch in range(1000):
             self.output("Processing epoch {}".format(current_epoch))
             self.sgd(trainset)
@@ -180,6 +193,7 @@ class SVD(AlgoBase):
                     break
             best_score = score
 
+        self.output("Setting n_epochs to {}".format(current_epoch))
         self.n_epochs = current_epoch
 
     def sgd(self, trainset):
@@ -217,15 +231,15 @@ class SVD(AlgoBase):
         # user and items factors by iterating over all factors...
 
         # user biases
-        cdef np.ndarray[np.double_t] bu
+        cdef np.ndarray[np.double_t] bu = self.bu
         # item biases
-        cdef np.ndarray[np.double_t] bi
+        cdef np.ndarray[np.double_t] bi = self.bi
         # user factors
-        cdef np.ndarray[np.double_t, ndim=2] pu
+        cdef np.ndarray[np.double_t, ndim=2] pu = self.pu
         # item factors
-        cdef np.ndarray[np.double_t, ndim=2] qi
+        cdef np.ndarray[np.double_t, ndim=2] qi = self.qi
 
-        cdef int u, i, f
+        cdef int u, i, f, current_epoch
         cdef double r, err, dot, puf, qif
         cdef double global_mean = self.trainset.global_mean
 
@@ -238,15 +252,6 @@ class SVD(AlgoBase):
         cdef double reg_bi = self.reg_bi
         cdef double reg_pu = self.reg_pu
         cdef double reg_qi = self.reg_qi
-
-        rng = get_rng(self.random_state)
-
-        bu = np.zeros(trainset.n_users, np.double)
-        bi = np.zeros(trainset.n_items, np.double)
-        pu = rng.normal(self.init_mean, self.init_std_dev,
-                        (trainset.n_users, self.n_factors))
-        qi = rng.normal(self.init_mean, self.init_std_dev,
-                        (trainset.n_items, self.n_factors))
 
         if not self.biased:
             global_mean = 0

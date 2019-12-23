@@ -26,3 +26,4 @@ tags
 settings.json
 
 .pytest_cache
+.eggs
