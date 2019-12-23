@@ -157,6 +157,10 @@ class SVD(AlgoBase):
 
         return self
 
+    def output (self, str):
+        if self.verbose:
+            print(str)
+
     def setOptimalNEpochs(self, trainset, testset):
         cdef int n_epochs, current_epoch
         cdef float best_score, score, ipvmt
