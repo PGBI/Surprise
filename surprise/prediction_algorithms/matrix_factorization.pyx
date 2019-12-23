@@ -13,6 +13,7 @@ from six.moves import range
 from .algo_base import AlgoBase
 from .predictions import PredictionImpossible
 from ..utils import get_rng
+from ..accuracy import rmse
 
 
 class SVD(AlgoBase):
@@ -156,6 +157,27 @@ class SVD(AlgoBase):
 
         return self
 
+    def setOptimalNEpochs(self, trainset, testset):
+        cdef int n_epochs, current_epoch
+        cdef float best_score, score, ipvmt
+        self.n_epochs = 1
+        AlgoBase.fit(self, trainset)
+        for current_epoch in range(1000):
+            self.output("Processing epoch {}".format(current_epoch))
+            self.sgd(trainset)
+            self.output("Calculating predictions on test set...")
+            score = rmse(self.test(testset), verbose=False)
+            self.output("RMSE on test set: {0:.4f}".format(score))
+            if best_score > 0:
+                ipvmt = 100 * (best_score - score) / best_score
+                self.output("Improved by {0:.2f}%".format(ipvmt))
+                if ipvmt < 0.02:
+                    # improvement less than 0.02%. Stopping there.
+                    break
+            best_score = score
+
+        self.n_epochs = current_epoch
+
     def sgd(self, trainset):
 
         # OK, let's breath. I've seen so many different implementation of this
@@ -259,23 +281,14 @@ class SVD(AlgoBase):
         known_user = self.trainset.knows_user(u)
         known_item = self.trainset.knows_item(i)
 
+        if not known_user or not known_item:
+            raise PredictionImpossible('User or item are unknown.')
+
+        est = np.dot(self.qi[i], self.pu[u])
         if self.biased:
-            est = self.trainset.global_mean
-
-            if known_user:
-                est += self.bu[u]
-
-            if known_item:
-                est += self.bi[i]
-
-            if known_user and known_item:
-                est += np.dot(self.qi[i], self.pu[u])
-
-        else:
-            if known_user and known_item:
-                est = np.dot(self.qi[i], self.pu[u])
-            else:
-                raise PredictionImpossible('User and item are unkown.')
+            est += self.trainset.global_mean
+            est += self.bu[u]
+            est += self.bi[i]
 
         return est
 
