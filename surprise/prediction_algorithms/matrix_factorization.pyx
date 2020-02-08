@@ -175,7 +175,8 @@ class SVD(AlgoBase):
 
     def fit_with_undefined_nepochs(self, trainset, testset):
         cdef int n_epochs, current_epoch
-        cdef float best_score, score, ipvmt
+        cdef float best_score = 5.0
+        cdef float score, ipvmt
         self.n_epochs = 1
         AlgoBase.fit(self, trainset)
         self.reset(trainset)
@@ -185,12 +186,11 @@ class SVD(AlgoBase):
             self.output("Calculating predictions on test set...")
             score = rmse(self.test(testset), verbose=False)
             self.output("RMSE on test set: {0:.4f}".format(score))
-            if best_score > 0:
-                ipvmt = 100 * (best_score - score) / best_score
-                self.output("Improved by {0:.2f}%".format(ipvmt))
-                if ipvmt < 0.02:
-                    # improvement less than 0.02%. Stopping there.
-                    break
+            ipvmt = 100 * (best_score - score) / best_score
+            self.output("Improved by {0:.2f}%".format(ipvmt))
+            if ipvmt < 0.02:
+                # improvement less than 0.02%. Stopping there.
+                 break
             best_score = score
 
         self.output("Setting n_epochs to {}".format(current_epoch))
